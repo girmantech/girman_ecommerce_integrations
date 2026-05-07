@@ -40,8 +40,8 @@ INVOICE_READY_PACKAGE_STATES = {
 	"SHIPPED",
 	"DELIVERED",
 }
-
-
+              
+@frappe.whitelist()
 def sync_new_orders(client: UnicommerceAPIClient = None, force=False):
 	"""Called from a scheduled job and syncs all new orders from last synced time.
 
@@ -111,19 +111,19 @@ def sync_new_orders(client: UnicommerceAPIClient = None, force=False):
 			order_status = (order.get("status") or "").upper()
 			shipping_packages = order.get("shippingPackages") or []
 
-			create_unicommerce_log(
-				status="Info",
-				method="sync_new_orders",
-				message=(
-					f"Processing Unicommerce order {order_code} "
-					f"(status={order_status}, shipping_packages={len(shipping_packages)})"
-				),
-				request_data={
-					"order_code": order_code,
-					"order_status": order_status,
-					"shipping_packages_count": len(shipping_packages),
-				},
-			)
+			# create_unicommerce_log(
+			# 	status="Info",
+			# 	method="sync_new_orders",
+			# 	message=(
+			# 		f"Processing Unicommerce order {order_code} "
+			# 		f"(status={order_status}, shipping_packages={len(shipping_packages)})"
+			# 	),
+			# 	request_data={
+			# 		"order_code": order_code,
+			# 		"order_status": order_status,
+			# 		"shipping_packages_count": len(shipping_packages),
+			# 	},
+			# )
 
 			sales_order = create_order(order, client=client)
 
