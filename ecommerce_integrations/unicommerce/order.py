@@ -43,14 +43,7 @@ INVOICE_READY_PACKAGE_STATES = {
 
 
 def sync_new_orders(client: UnicommerceAPIClient = None, force=False):
-	"""Called from a scheduled job and syncs all new orders from last synced time.
-
-	Logging policy:
-	- No logs for routine scheduler skips.
-	- No logs when there are no orders.
-	- No logs for already-existing SO / SI, already-synced items, or skipped invoice attempts.
-	- Log only meaningful outcomes: batch summary, actual create success, and real errors.
-	"""
+	"""Called from a scheduled job and syncs all new orders from last synced time."""
 	settings = frappe.get_cached_doc(SETTINGS_DOCTYPE)
 
 	if not settings.is_enabled():
@@ -66,7 +59,6 @@ def sync_new_orders(client: UnicommerceAPIClient = None, force=False):
 		status_filter = None
 		new_orders = list(_get_new_orders(client, status=status_filter) or [])
 
-		# Silent no-op when nothing is returned.
 		if not new_orders:
 			return
 
@@ -101,7 +93,7 @@ def sync_new_orders(client: UnicommerceAPIClient = None, force=False):
 					stats["invoice_attempts"] += 1
 					stats["invoices_created"] += _create_sales_invoices(order, sales_order, client)
 
-			except Exception as e:
+			except Exception:
 				stats["errors"] += 1
 				error_snapshots.append({
 					"order_code": order_code,
@@ -109,7 +101,6 @@ def sync_new_orders(client: UnicommerceAPIClient = None, force=False):
 				})
 				continue
 
-		# Log only when there was meaningful work or an error.
 		meaningful_activity = (
 			stats["sales_orders_created"]
 			or stats["invoices_created"]
@@ -142,13 +133,6 @@ def sync_new_orders(client: UnicommerceAPIClient = None, force=False):
 
 
 def _is_effectively_completed(unicommerce_order: UnicommerceOrder) -> bool:
-	"""Decide if an order is completed enough to attempt invoice sync.
-
-	We treat it as effectively completed if:
-	- order.status is COMPLETE / COMPLETED, OR
-	- any shipping package is in a state that generally implies invoicing / shipment progression, OR
-	- any shipping package already exposes an invoice code in payload.
-	"""
 	if not unicommerce_order:
 		return False
 
@@ -173,9 +157,7 @@ def _is_effectively_completed(unicommerce_order: UnicommerceOrder) -> bool:
 
 
 def _get_new_orders(client: UnicommerceAPIClient, status: str | None) -> Iterator[UnicommerceOrder] | None:
-	"""Search new sales orders from Unicommerce."""
-
-	updated_since = 24 * 60  # minutes
+	updated_since = 24 * 60
 	uni_orders = client.search_sales_order(updated_since=updated_since, status=status)
 	if not uni_orders:
 		return
@@ -210,10 +192,6 @@ def _get_new_orders(client: UnicommerceAPIClient, status: str | None) -> Iterato
 
 
 def _create_sales_invoices(unicommerce_order, sales_order, client: UnicommerceAPIClient) -> int:
-	"""Create Sales Invoices from Sales Orders once the order looks invoice-ready.
-
-	Returns number of invoices actually created.
-	"""
 	from ecommerce_integrations.unicommerce.invoice import create_sales_invoice
 
 	facility_code = sales_order.get(FACILITY_CODE_FIELD)
@@ -285,11 +263,6 @@ def _create_sales_invoices(unicommerce_order, sales_order, client: UnicommerceAP
 def create_order(
 	payload: UnicommerceOrder, request_id: str | None = None, client=None
 ) -> tuple[Any | None, bool]:
-	"""Create Sales Order if missing.
-
-	Returns:
-		(tuple): (sales_order_doc_or_none, was_created)
-	"""
 	order = payload
 
 	existing_so = frappe.db.get_value("Sales Order", {ORDER_CODE_FIELD: order["code"]})
@@ -328,10 +301,6 @@ def create_order(
 
 
 def _sync_order_items(order: UnicommerceOrder, client: UnicommerceAPIClient) -> set[str]:
-	"""Ensure all items are synced before processing order.
-
-	If not synced then product sync for specific item is initiated.
-	"""
 	items = {so_item["itemSku"] for so_item in order["saleOrderItems"]}
 
 	for item in items:
@@ -419,10 +388,6 @@ def _get_line_items(
 def get_taxes(line_items, channel_config) -> list:
 	taxes = []
 
-	# Note: Tax details are NOT available during SO stage.
-	# Fields are also different hence during SO stage this function won't capture GST.
-	# Same function is also used in invoice to recompute accurate tax and charges.
-	# When invoice is created, tax details are added.
 	tax_map = {tax_head: 0.0 for tax_head in TAX_FIELDS_MAPPING.keys()}
 	item_wise_tax_map = {tax_head: {} for tax_head in TAX_FIELDS_MAPPING.keys()}
 
@@ -471,7 +436,6 @@ def _get_facility_code(line_items) -> str:
 
 
 def update_shipping_info(doc, method=None):
-	"""When package type is changed, update the shipping information on unicommerce."""
 	so = doc
 
 	if not so.has_value_changed(PACKAGE_TYPE_FIELD):
@@ -522,7 +486,6 @@ def _update_package_info_on_unicommerce(so_code):
 
 
 def _get_batch_no(so_line_item) -> str | None:
-	"""If specified vendor batch code is valid batch number in ERPNext then get batch no."""
 	batch_no = ((so_line_item.get("batchDTO") or {}).get("batchFieldsDTO") or {}).get("vendorBatchNumber")
 	if batch_no and frappe.db.exists("Batch", batch_no):
 		return batch_no
