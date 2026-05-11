@@ -135,6 +135,12 @@ def bulk_generate_invoices(
 		client = UnicommerceAPIClient()
 	frappe.flags.request_id = request_id  #  for auto-picking current log
 
+	# Log: invoice sync initiated
+	create_unicommerce_log(
+		status="Queued",
+		message=f"Invoice sync initiated for orders: {', '.join(sales_orders)}",
+	)
+
 	update_invoicing_status(sales_orders, "Queued")
 
 	failed_orders = []
@@ -146,7 +152,14 @@ def bulk_generate_invoices(
 			wh_allocation = warehouse_allocation.get(so_code) if warehouse_allocation else None
 			_generate_invoice(client, so, channel_config, warehouse_allocation=wh_allocation)
 		except Exception as e:
-			create_unicommerce_log(status="Failure", exception=e, rollback=True, make_new=True)
+			# Log a failure for this order but keep looping
+			create_unicommerce_log(
+				status="Failure",
+				message=f"Invoice sync failed for order {so_code}",
+				exception=e,
+				rollback=True,
+				make_new=True,
+			)
 			failed_orders.append(so_code)
 
 	_log_invoice_generation(sales_orders, failed_orders)
@@ -159,19 +172,23 @@ def _log_invoice_generation(sales_orders, failed_orders):
 
 	percent_success = len(successful_orders) / len(sales_orders)
 
-	failure_message = "\n".join(
-		[
-			f"generate invoices: {percent_success:.3%} invoices successful\n",
-			f"Failred orders = {', '.join(failed_orders)}",
-			f"Requested orders = {', '.join(sales_orders)}",
-		]
-	)
-
 	update_invoicing_status(failed_orders, "Failed")
 	update_invoicing_status(successful_orders, "Success")
 
 	status = {0.0: "Failure", 100.0: "Success"}.get(percent_success) or "Partial Success"
-	create_unicommerce_log(status=status, message=failure_message)
+
+	# Log: final status for this sync batch
+	if status == "Success":
+		msg = f"Invoice sync success for all orders: {', '.join(successful_orders)}"
+	elif status == "Failure":
+		msg = f"Invoice sync failed for all orders: {', '.join(failed_orders)}"
+	else:
+		msg = (
+			f"Invoice sync partially successful. "
+			f"Success: {', '.join(successful_orders)} | Failed: {', '.join(failed_orders)}"
+		)
+
+	create_unicommerce_log(status=status, message=msg)
 
 
 def _get_orders_with_missing_invoice(sales_orders):
@@ -414,6 +431,7 @@ def create_sales_invoice(
 		# Clear any existing taxes and recalculate from template
 		si.set("taxes", [])
 		si.set_taxes()
+		si.calculate_taxes_and_totals()
 	else:
 		# If we can't pick a GST template, log and stop; better than creating a non-compliant invoice
 		create_unicommerce_log(
