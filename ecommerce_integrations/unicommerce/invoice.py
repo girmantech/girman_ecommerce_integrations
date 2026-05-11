@@ -431,6 +431,7 @@ def create_sales_invoice(
 		# Clear any existing taxes and recalculate from template
 		si.set("taxes", [])
 		si.set_taxes()
+		si.calculate_taxes_and_totals()
 	else:
 		# If we can't pick a GST template, log and stop; better than creating a non-compliant invoice
 		create_unicommerce_log(

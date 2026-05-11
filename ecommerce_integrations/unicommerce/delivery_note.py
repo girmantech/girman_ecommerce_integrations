@@ -46,16 +46,34 @@ def prepare_delivery_note():
 
 
 def create_delivery_note(so, sales_invoice):
-	# Create the delivery note
-	from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note
+    # Create the delivery note
+    from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note
+    from collections import defaultdict
 
-	res = make_delivery_note(source_name=so.name)
-	res.unicommerce_order_code = sales_invoice.unicommerce_order_code
-	res.unicommerce_shipment_id = sales_invoice.unicommerce_shipping_package_code
-	res.save()
-	res.submit()
-	log = create_unicommerce_log(method="create_delevery_note", make_new=True)
-	frappe.flags.request_id = log.name
-	create_unicommerce_log(status="Success")
-	frappe.flags.request_id = None
-	return res
+    res = make_delivery_note(source_name=so.name)
+    res.unicommerce_order_code = sales_invoice.unicommerce_order_code
+    res.unicommerce_shipment_id = sales_invoice.unicommerce_shipping_package_code
+
+    si_item_map = defaultdict(list)
+    for si_item in sales_invoice.items:
+        si_item_map[si_item.item_code].append(si_item)
+
+    used_si_items = set()
+
+    for item in res.items:
+        item.against_sales_invoice = sales_invoice.name
+        for si_item in si_item_map.get(item.item_code, []):
+            if si_item.name not in used_si_items:
+                item.si_detail = si_item.name
+                used_si_items.add(si_item.name)
+                break
+
+    res.save()
+    res.submit()
+
+    log = create_unicommerce_log(method="create_delivery_note", make_new=True)
+    frappe.flags.request_id = log.name
+    create_unicommerce_log(status="Success")
+    frappe.flags.request_id = None
+
+    return res

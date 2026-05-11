@@ -40,8 +40,8 @@ INVOICE_READY_PACKAGE_STATES = {
 	"SHIPPED",
 	"DELIVERED",
 }
-
-
+              
+@frappe.whitelist()
 def sync_new_orders(client: UnicommerceAPIClient = None, force=False):
 	"""Called from a scheduled job and syncs all new orders from last synced time."""
 	settings = frappe.get_cached_doc(SETTINGS_DOCTYPE)
@@ -74,6 +74,7 @@ def sync_new_orders(client: UnicommerceAPIClient = None, force=False):
 
 		for order in new_orders:
 			order_code = order.get("code")
+
 
 			try:
 				sales_order, so_created = create_order(order, client=client)
