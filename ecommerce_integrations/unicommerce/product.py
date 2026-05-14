@@ -397,3 +397,4 @@ def validate_item(doc, method=None):
     item_group = frappe.get_cached_doc("Item Group", item.item_group)
     if not item_group.get(PRODUCT_CATEGORY_FIELD):
         frappe.throw(_("Unicommerce Product category required in Item Group: {}").format(item_group.name))
+
