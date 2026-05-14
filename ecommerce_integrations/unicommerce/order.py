@@ -39,6 +39,7 @@ INVOICE_READY_PACKAGE_STATES = {
 	"MANIFESTED",
 	"SHIPPED",
 	"DELIVERED",
+	"CREATED"
 }
               
 @frappe.whitelist()
@@ -245,7 +246,7 @@ def _create_sales_invoices(unicommerce_order, sales_order, client: UnicommerceAP
 
 			invoice = (invoice_data or {}).get("invoice") or {}
 			invoice_code = invoice.get("code")
-				continue
+			
 
 			existing_si = frappe.db.get_value("Sales Invoice", {INVOICE_CODE_FIELD: invoice_code})
 			if existing_si:
