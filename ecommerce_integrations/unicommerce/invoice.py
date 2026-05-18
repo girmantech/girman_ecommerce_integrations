@@ -135,12 +135,6 @@ def bulk_generate_invoices(
 		client = UnicommerceAPIClient()
 	frappe.flags.request_id = request_id  #  for auto-picking current log
 
-	# Log: invoice sync initiated
-	create_unicommerce_log(
-		status="Queued",
-		message=f"Invoice sync initiated for orders: {', '.join(sales_orders)}",
-	)
-
 	update_invoicing_status(sales_orders, "Queued")
 
 	failed_orders = []
