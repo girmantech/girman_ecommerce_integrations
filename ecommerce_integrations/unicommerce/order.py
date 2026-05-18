@@ -48,19 +48,9 @@ def sync_new_orders(client: UnicommerceAPIClient = None, force=False):
 	settings = frappe.get_cached_doc(SETTINGS_DOCTYPE)
 
 	if not settings.is_enabled():
-		create_unicommerce_log(
-			status="Info",
-			method="sync_new_orders",
-			message="Skipping sync_new_orders because Unicommerce integration is disabled",
-		)
 		return
 
 	if not force and not need_to_run(SETTINGS_DOCTYPE, "order_sync_frequency", "last_order_sync"):
-		create_unicommerce_log(
-			status="Info",
-			method="sync_new_orders",
-			message="Skipping sync_new_orders due to scheduling frequency check",
-		)
 		return
 
 	if client is None:
@@ -214,13 +204,6 @@ def _get_new_orders(client: UnicommerceAPIClient, status: str | None) -> Iterato
 				request_data={"order_code": order_code},
 			)
 			yield full_order
-		else:
-			create_unicommerce_log(
-				status="Error",
-				method="_get_new_orders",
-				message=f"Could not fetch full order details for Uni order {order_code}",
-				request_data={"order_code": order_code},
-			)
 
 
 def _create_sales_invoices(unicommerce_order, sales_order, client: UnicommerceAPIClient):
