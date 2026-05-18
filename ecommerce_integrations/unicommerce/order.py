@@ -161,7 +161,6 @@ def _get_new_orders(client: UnicommerceAPIClient, status: str | None) -> Iterato
 	updated_since = 24 * 60
 	uni_orders = client.search_sales_order(updated_since=updated_since, status=status)
 	if not uni_orders:
-
 		return
 
 	configured_channels = {
@@ -170,12 +169,6 @@ def _get_new_orders(client: UnicommerceAPIClient, status: str | None) -> Iterato
 	}
 	if not configured_channels:
 		return
-
-	create_unicommerce_log(
-		status="Info",
-		method="_get_new_orders",
-		message=f"Found enabled channels: {', '.join(sorted(configured_channels))}",
-	)
 
 	for order in uni_orders:
 		order_code = order.get("code")
@@ -197,12 +190,12 @@ def _get_new_orders(client: UnicommerceAPIClient, status: str | None) -> Iterato
 		full_order = client.get_sales_order(order_code=order_code)
 
 		if full_order:
-			create_unicommerce_log(
-				status="Info",
-				method="_get_new_orders",
-				message=f"Fetched full details for Uni order {order_code}",
-				request_data={"order_code": order_code},
-			)
+			# create_unicommerce_log(
+			# 	status="Info",
+			# 	method="_get_new_orders",
+			# 	message=f"Fetched full details for Uni order {order_code}",
+			# 	request_data={"order_code": order_code},
+			# )
 			yield full_order
 
 
@@ -233,14 +226,14 @@ def _create_sales_invoices(unicommerce_order, sales_order, client: UnicommerceAP
 
 			existing_si = frappe.db.get_value("Sales Invoice", {INVOICE_CODE_FIELD: invoice_code})
 			if existing_si:
-				create_unicommerce_log(
-					status="Info",
-					method="_create_sales_invoices",
-					message=(
-						f"Sales Invoice {existing_si} already exists for Uni invoice {invoice_code}, skipping"
-					),
-					request_data={"invoice_code": invoice_code, "sales_invoice": existing_si},
-				)
+				# create_unicommerce_log(
+				# 	status="Info",
+				# 	method="_create_sales_invoices",
+				# 	message=(
+				# 		f"Sales Invoice {existing_si} already exists for Uni invoice {invoice_code}, skipping"
+				# 	),
+				# 	request_data={"invoice_code": invoice_code, "sales_invoice": existing_si},
+				# )
 				continue
 
 			log = create_unicommerce_log(
@@ -304,12 +297,12 @@ def create_order(
 	frappe.set_user("Administrator")
 	frappe.flags.request_id = request_id
 	try:
-		create_unicommerce_log(
-			status="Info",
-			method="create_order",
-			message=f"Starting Sales Order creation for Uni order {order.get('code')}",
-			request_data={"order_code": order.get("code"), "status": order.get("status")},
-		)
+		# create_unicommerce_log(
+		# 	status="Info",
+		# 	method="create_order",
+		# 	message=f"Starting Sales Order creation for Uni order {order.get('code')}",
+		# 	request_data={"order_code": order.get("code"), "status": order.get("status")},
+		# )
 
 		_sync_order_items(order, client=client)
 		customer = sync_customer(order)
@@ -333,21 +326,21 @@ def create_order(
 def _sync_order_items(order: UnicommerceOrder, client: UnicommerceAPIClient) -> set[str]:
 	items = {so_item["itemSku"] for so_item in order["saleOrderItems"]}
 
-	create_unicommerce_log(
-		status="Info",
-		method="_sync_order_items",
-		message=f"Syncing/validating {len(items)} item(s) for Uni order {order.get('code')}",
-		request_data={"order_code": order.get("code"), "items": list(items)},
-	)
+	# create_unicommerce_log(
+	# 	status="Info",
+	# 	method="_sync_order_items",
+	# 	message=f"Syncing/validating {len(items)} item(s) for Uni order {order.get('code')}",
+	# 	request_data={"order_code": order.get("code"), "items": list(items)},
+	# )
 
 	for item in items:
 		if ecommerce_item.is_synced(integration=MODULE_NAME, integration_item_code=item):
-			create_unicommerce_log(
-				status="Info",
-				method="_sync_order_items",
-				message=f"Item {item} already synced",
-				request_data={"item_sku": item},
-			)
+			# create_unicommerce_log(
+			# 	status="Info",
+			# 	method="_sync_order_items",
+			# 	message=f"Item {item} already synced",
+			# 	request_data={"item_sku": item},
+			# )
 			continue
 		import_product_from_unicommerce(sku=item, client=client)
 
@@ -363,20 +356,20 @@ def _create_order(order: UnicommerceOrder, customer) -> None:
 	facility_code = _get_facility_code(order["saleOrderItems"])
 	company_address, dispatch_address = settings.get_company_addresses(facility_code)
 
-	create_unicommerce_log(
-		status="Info",
-		method="_create_order",
-		message=(
-			f"Building Sales Order for Uni order {order.get('code')} "
-			f"(channel={order.get('channel')}, facility={facility_code}, cancelled={is_cancelled})"
-		),
-		request_data={
-			"order_code": order.get("code"),
-			"channel": order.get("channel"),
-			"facility_code": facility_code,
-			"is_cancelled": is_cancelled,
-		},
-	)
+	# create_unicommerce_log(
+	# 	status="Info",
+	# 	method="_create_order",
+	# 	message=(
+	# 		f"Building Sales Order for Uni order {order.get('code')} "
+	# 		f"(channel={order.get('channel')}, facility={facility_code}, cancelled={is_cancelled})"
+	# 	),
+	# 	request_data={
+	# 		"order_code": order.get("code"),
+	# 		"channel": order.get("channel"),
+	# 		"facility_code": facility_code,
+	# 		"is_cancelled": is_cancelled,
+	# 	},
+	# )
 
 	so = frappe.get_doc(
 		{
@@ -405,31 +398,23 @@ def _create_order(order: UnicommerceOrder, customer) -> None:
 
 	so.flags.raw_data = order
 	so.save()
-
-	create_unicommerce_log(
-		status="Info",
-		method="_create_order",
-		message=f"Saved Sales Order draft {so.name} for Uni order {order.get('code')}",
-		request_data={"order_code": order.get("code"), "sales_order": so.name},
-	)
-
 	so.submit()
 
-	create_unicommerce_log(
-		status="Info",
-		method="_create_order",
-		message=f"Submitted Sales Order {so.name} for Uni order {order.get('code')}",
-		request_data={"order_code": order.get("code"), "sales_order": so.name},
-	)
+	# create_unicommerce_log(
+	# 	status="Info",
+	# 	method="_create_order",
+	# 	message=f"Submitted Sales Order {so.name} for Uni order {order.get('code')}",
+	# 	request_data={"order_code": order.get("code"), "sales_order": so.name},
+	# )
 
 	if is_cancelled:
 		so.cancel()
-		create_unicommerce_log(
-			status="Info",
-			method="_create_order",
-			message=f"Cancelled Sales Order {so.name} because Uni order {order.get('code')} is cancelled",
-			request_data={"order_code": order.get("code"), "sales_order": so.name},
-		)
+		# create_unicommerce_log(
+		# 	status="Info",
+		# 	method="_create_order",
+		# 	message=f"Cancelled Sales Order {so.name} because Uni order {order.get('code')} is cancelled",
+		# 	request_data={"order_code": order.get("code"), "sales_order": so.name},
+		# )
 
 	return so
 
