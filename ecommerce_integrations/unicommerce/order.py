@@ -307,13 +307,19 @@ def create_order(
 		_sync_order_items(order, client=client)
 		customer = sync_customer(order)
 		sales_order = _create_order(order, customer)
+
+		create_unicommerce_log(
+			status="Success",
+			method="create_order",
+			request_data={"order_code": payload.get("code"), "payload" : order },
+		)
 	except Exception as e:
 		create_unicommerce_log(
 			status="Error",
 			method="create_order",
 			exception=e,
 			rollback=True,
-			request_data={"order_code": payload.get("code")},
+			request_data={"order_code": payload.get("code"), "payload" : order },
 		)
 		raise
 	finally:
