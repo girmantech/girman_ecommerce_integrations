@@ -158,7 +158,9 @@ def _is_effectively_completed(unicommerce_order: UnicommerceOrder) -> bool:
 
 
 def _get_new_orders(client: UnicommerceAPIClient, status: str | None) -> Iterator[UnicommerceOrder] | None:
-	updated_since = 24 * 60
+	# updated_since = 24 * 60
+	settings = frappe.get_cached_doc(SETTINGS_DOCTYPE)
+	updated_since = settings.sync_order_hours * 60
 	uni_orders = client.search_sales_order(updated_since=updated_since, status=status)
 	if not uni_orders:
 		return
