@@ -30,6 +30,8 @@ from ecommerce_integrations.unicommerce.product import import_product_from_unico
 from ecommerce_integrations.unicommerce.utils import create_unicommerce_log, get_unicommerce_date
 from ecommerce_integrations.utils.taxation import get_dummy_tax_category
 
+import india_compliance.gst_india.overrides.transaction as _ic_tx
+
 UnicommerceOrder = NewType("UnicommerceOrder", dict[str, Any])
 
 INVOICE_READY_PACKAGE_STATES = {
@@ -405,8 +407,15 @@ def _create_order(order: UnicommerceOrder, customer) -> None:
 	)
 
 	so.flags.raw_data = order
-	so.save()
-	so.submit()
+
+	_orig_validate_item_tax_template = _ic_tx.validate_item_tax_template
+	try:
+		_ic_tx.validate_item_tax_template = lambda doc: None
+		so.save()
+		so.submit()
+	finally:
+		_ic_tx.validate_item_tax_template = _orig_validate_item_tax_template
+
 
 	# create_unicommerce_log(
 	# 	status="Info",
