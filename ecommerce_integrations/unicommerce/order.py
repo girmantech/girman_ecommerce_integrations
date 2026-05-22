@@ -33,16 +33,6 @@ from ecommerce_integrations.utils.taxation import get_dummy_tax_category
 import india_compliance.gst_india.overrides.transaction as _ic_tx
 
 UnicommerceOrder = NewType("UnicommerceOrder", dict[str, Any])
-
-INVOICE_READY_PACKAGE_STATES = {
-	"PACKED",
-	"READY_TO_SHIP",
-	"DISPATCHED",
-	"MANIFESTED",
-	"SHIPPED",
-	"DELIVERED",
-	"CREATED"
-}
               
 @frappe.whitelist()
 def sync_new_orders(client: UnicommerceAPIClient = None, force=False):
@@ -59,8 +49,8 @@ def sync_new_orders(client: UnicommerceAPIClient = None, force=False):
 		client = UnicommerceAPIClient()
 
 	try:
-		status_filter = None
-		new_orders = list(_get_new_orders(client, status=status_filter) or [])
+		status = "COMPLETE" if settings.only_sync_completed_orders else None
+		new_orders = list(_get_new_orders(client, status=status) or [])
 
 		if not new_orders:
 			return
@@ -78,7 +68,6 @@ def sync_new_orders(client: UnicommerceAPIClient = None, force=False):
 		for order in new_orders:
 			order_code = order.get("code")
 
-
 			try:
 				sales_order, so_created = create_order(order, client=client)
 				if so_created:
@@ -88,11 +77,7 @@ def sync_new_orders(client: UnicommerceAPIClient = None, force=False):
 
 				if not sales_order:
 					continue
-				effectively_completed = _is_effectively_completed(order)
-				if settings.only_sync_completed_orders and not effectively_completed:
-					continue
-
-				if effectively_completed:
+				if settings.only_sync_completed_orders:
 					stats["invoice_attempts"] += 1
 					stats["invoices_created"] += _create_sales_invoices(order, sales_order, client)
 
@@ -133,31 +118,6 @@ def sync_new_orders(client: UnicommerceAPIClient = None, force=False):
 			rollback=True,
 		)
 		raise
-
-
-def _is_effectively_completed(unicommerce_order: UnicommerceOrder) -> bool:
-	if not unicommerce_order:
-		return False
-
-	order_status = (unicommerce_order.get("status") or "").upper()
-	if order_status in {"COMPLETE", "COMPLETED"}:
-		return True
-
-	shipping_packages = unicommerce_order.get("shippingPackages") or []
-	for package in shipping_packages:
-		package_status = (package.get("status") or "").upper()
-		if package_status in INVOICE_READY_PACKAGE_STATES:
-			return True
-
-		invoice_code = (
-			((package.get("invoiceDTO") or {}).get("invoice") or {}).get("code")
-			or package.get("invoiceCode")
-		)
-		if invoice_code:
-			return True
-
-	return False
-
 
 def _get_new_orders(client: UnicommerceAPIClient, status: str | None) -> Iterator[UnicommerceOrder] | None:
 	# updated_since = 24 * 60
