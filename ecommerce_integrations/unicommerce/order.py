@@ -373,6 +373,20 @@ def _create_order(order: UnicommerceOrder, customer) -> None:
 		_ic_tx.validate_item_tax_template = lambda doc: None
 		so.save()
 		so.submit()
+	except Exception as e:
+		error_str = str(e)
+		if "gst" not in error_str.lower() and "tax template" not in error_str.lower():
+			raise
+		create_unicommerce_log(
+			status="Warning",
+			method="_create_order",
+			message=(
+				f"GST validation error suppressed while saving/submitting Sales Order "
+				f"for Unicommerce order {order.get('code')}. Error: {error_str}"
+			),
+			request_data={"order_code": order.get("code")},
+		)
+		raise  # still propagate — SO creation failing is more serious than SI
 	finally:
 		_ic_tx.validate_item_tax_template = _orig_validate_item_tax_template
 

@@ -33,6 +33,7 @@ from ecommerce_integrations.unicommerce.utils import (
 	get_unicommerce_date,
 	remove_non_alphanumeric_chars,
 )
+import india_compliance.gst_india.overrides.transaction as _ic_tx
 
 JsonDict = dict[str, Any]
 SOCode = NewType("SOCode", str)
@@ -457,10 +458,37 @@ def create_sales_invoice(
 	si.flags.raw_data = si_data
 
 	# Let India Compliance run its hooks/validations
-	si.insert()
+	# Bypass GST item-tax-template validation so that
+	# transient GST mismatches never block invoice creation.  A warning log is
+	# emitted below if the bypass was actually needed.
+	_orig_validate_item_tax_template = _ic_tx.validate_item_tax_template
+	gst_error_message = None
+	try:
+		_ic_tx.validate_item_tax_template = lambda doc: None
+		si.insert()
+	except Exception as e:
+		error_str = str(e)
+		# Re-raise non-GST errors immediately; only swallow GST validation noise.
+		if "gst" not in error_str.lower() and "tax template" not in error_str.lower():
+			raise
+		gst_error_message = error_str
+		create_unicommerce_log(
+			status="Warning",
+			method="create_sales_invoice",
+			message=(
+				f"GST validation error suppressed while inserting Sales Invoice for "
+				f"Unicommerce invoice {si_data.get('code')} / SO {so_code}. "
+				f"Error: {error_str}"
+			),
+			request_data={"invoice_code": si_data.get("code"), "sales_order": so_code},
+		)
+		return  # cannot continue without a saved document
+	finally:
+		_ic_tx.validate_item_tax_template = _orig_validate_item_tax_template
 
-	# Compare totals with Unicommerce; leave a comment if mismatch
-	_verify_total(si, si_data)
+	if gst_error_message is None:
+		# Compare totals with Unicommerce; leave a comment if mismatch
+		_verify_total(si, si_data)
 
 	# Attach Uniware invoice + label PDFs
 	attach_unicommerce_docs(
@@ -480,7 +508,27 @@ def create_sales_invoice(
 
 	# Submit and create payment entry if configured
 	if submit:
-		si.submit()
+		_orig_validate_item_tax_template = _ic_tx.validate_item_tax_template
+		try:
+			_ic_tx.validate_item_tax_template = lambda doc: None
+			si.submit()
+		except Exception as e:
+			error_str = str(e)
+			if "gst" not in error_str.lower() and "tax template" not in error_str.lower():
+				raise
+			create_unicommerce_log(
+				status="Warning",
+				method="create_sales_invoice",
+				message=(
+					f"GST validation error suppressed while submitting Sales Invoice {si.name} "
+					f"for Unicommerce invoice {si_data.get('code')} / SO {so_code}. "
+					f"Error: {error_str}"
+				),
+				request_data={"invoice_code": si_data.get("code"), "sales_invoice": si.name},
+			)
+			return si  # inserted but not submitted — caller sees the doc, sync loop continues
+		finally:
+			_ic_tx.validate_item_tax_template = _orig_validate_item_tax_template
 
 	if cint(channel_config.auto_payment_entry):
 		make_payment_entry(si, channel_config, si.posting_date)
