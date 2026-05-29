@@ -335,22 +335,54 @@ def _get_gst_tax_template(si):
 					"Address", shipping_address, "gst_state_number"
 				)
 
-		# Decide template based on state match
-		if company_state_code and customer_state_code:
-			if str(company_state_code) == str(customer_state_code):
-				template_name = "Output GST In-state - BLP"
-			else:
-				template_name = "Output GST Out-state - BLP"
-		else:
-			# Fallback when we can't determine customer state
-			template_name = "Output GST In-state - BLP"
+		if not company_state_code or not customer_state_code:
+			return None
 
-		if frappe.db.exists("Sales Taxes and Charges Template", template_name):
-			return template_name
+		is_in_state = str(company_state_code) == str(customer_state_code)
 
-	except Exception:
-		# Don't block invoice creation because of lookup errors here.
-		pass
+		gst_account_row = frappe.db.get_value(
+			"GST Account",
+			{
+				"company": si.company,
+				"account_type": "Output",
+			},
+			["cgst_account", "sgst_account", "igst_account"],
+			as_dict=True,
+		)
+
+		if not gst_account_row:
+			return None
+
+		expected_accounts = (
+			[
+				gst_account_row.cgst_account,
+				gst_account_row.sgst_account,
+			]
+			if is_in_state
+			else [gst_account_row.igst_account]
+		)
+
+		for template in frappe.get_all(
+			"Sales Taxes and Charges Template",
+			filters={"company": si.company},
+			pluck="name",
+		):
+			template_accounts = frappe.get_all(
+				"Sales Taxes and Charges",
+				filters={"parent": template},
+				pluck="account_head",
+			)
+
+			if sorted(template_accounts) == sorted(expected_accounts):
+				return template
+
+	except Exception as e:
+		create_unicommerce_log(
+			status="Failure",
+			method="_get_gst_tax_template",
+			message=f"Failed to resolve GST tax template: {e}",
+			exception=e,
+		)
 
 	return None
 
