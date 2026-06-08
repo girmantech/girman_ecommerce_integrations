@@ -415,6 +415,13 @@ def _get_line_items(
 ) -> list[dict[str, Any]]:
 	settings = frappe.get_cached_doc(SETTINGS_DOCTYPE)
 	wh_map = settings.get_integration_to_erpnext_wh_mapping(all_wh=True)
+
+	# Load custom field mappings once — skip entirely if table is empty
+	custom_field_mappings = [
+		row for row in (settings.get("custom_item_field_mapping") or [])
+		if row.enabled
+	]
+
 	so_items = []
 
 	for item in line_items:
@@ -432,17 +439,30 @@ def _get_line_items(
 		)
 		warehouse = wh_map.get(item["facilityCode"]) or default_warehouse
 
-		so_items.append(
-			{
-				"item_code": item_code,
-				"rate": item["sellingPrice"],
-				"qty": 1,
-				"stock_uom": "Nos",
-				"warehouse": warehouse,
-				ORDER_ITEM_CODE_FIELD: item.get("code"),
-				ORDER_ITEM_BATCH_NO: _get_batch_no(item),
-			}
-		)
+		so_item = {
+			"item_code": item_code,
+			"rate": item["sellingPrice"],
+			"qty": 1,
+			"stock_uom": "Nos",
+			"warehouse": warehouse,
+			ORDER_ITEM_CODE_FIELD: item.get("code"),
+			ORDER_ITEM_BATCH_NO: _get_batch_no(item),
+		}
+
+		# Apply custom field mappings if any rows are configured
+		for mapping in custom_field_mappings:
+			value = _resolve_custom_field_value(
+				payload_field=mapping.payload_field,
+				is_nested=bool(mapping.is_nested_path),
+				field_type=mapping.field_type,
+				fallback=mapping.fallback_value or None,
+				item=item,
+			)
+			if value is not None:
+				so_item[mapping.erpnext_item_field] = value
+
+		so_items.append(so_item)
+
 	return so_items
 
 
@@ -551,6 +571,42 @@ def _get_batch_no(so_line_item) -> str | None:
 	if batch_no and frappe.db.exists("Batch", batch_no):
 		return batch_no
 
+def _resolve_custom_field_value(payload_field: str, is_nested: bool, field_type: str, fallback: str | None, item: dict) -> Any:
+	"""Extract and cast a value from a saleOrderItem using the field mapping config."""
+	try:
+		if is_nested:
+			value = item
+			for key in payload_field.split("."):
+				if not isinstance(value, dict):
+					value = None
+					break
+				value = value.get(key)
+		else:
+			value = item.get(payload_field)
+	except Exception:
+		value = None
+
+	# Apply fallback if value is missing
+	if value is None or value == "":
+		value = fallback or None
+
+	if value is None:
+		return None
+
+	# Cast to declared type
+	try:
+		if field_type == "Int":
+			return frappe.utils.cint(value)
+		elif field_type == "Float":
+			return flt(value)
+		elif field_type == "Check":
+			return frappe.utils.cint(value)
+		elif field_type in ("Data", "Link", "Date"):  # ← Link added here
+			return str(value)
+		else:
+			return str(value)
+	except Exception:
+		return str(value)
 
 def _get_warehouse_allocations(sales_order):
 	item_details = []

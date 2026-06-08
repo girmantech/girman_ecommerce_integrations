@@ -30,6 +30,8 @@
   "sales_invoice_series",
   "order_status_days",
   "sync_order_hours",
+  "section_break_qbzo",
+  "custom_item_field_mapping",
   "delivery_note_settings_section",
   "delivery_note",
   "inventory_sync_settings_section",
@@ -270,12 +272,22 @@
    "fieldtype": "Int",
    "label": "Sync Order Hours",
    "non_negative": 1
+  },
+  {
+   "fieldname": "section_break_qbzo",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "custom_item_field_mapping",
+   "fieldtype": "Table",
+   "label": "Custom Item Field Mapping",
+   "options": "Unicommerce Custom Item Field"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-21 10:44:26.620358",
+ "modified": "2026-06-04 20:33:42.235592",
  "modified_by": "Administrator",
  "module": "unicommerce",
  "name": "Unicommerce Settings",
