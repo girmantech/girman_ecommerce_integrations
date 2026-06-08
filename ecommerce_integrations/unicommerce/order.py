@@ -359,7 +359,7 @@ def _create_order(order: UnicommerceOrder, customer) -> None:
 			),
 			"company": channel_config.company,
 			"taxes": get_taxes(order["saleOrderItems"], channel_config),
-			"tax_category": get_dummy_tax_category(),
+			# "tax_category": get_dummy_tax_category(),
 			"company_address": company_address,
 			"dispatch_address_name": dispatch_address,
 			"currency": order.get("currencyCode"),
@@ -441,7 +441,7 @@ def _get_line_items(
 
 		so_item = {
 			"item_code": item_code,
-			"rate": item["sellingPrice"],
+			"rate": item["sellingPrice"] - (item.get("totalStateGst") or 0) - (item.get("totalCentralGst") or 0) - (item.get("totalIntegratedGst") or 0),
 			"qty": 1,
 			"stock_uom": "Nos",
 			"warehouse": warehouse,
