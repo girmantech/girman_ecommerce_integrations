@@ -419,24 +419,24 @@ def create_sales_invoice(
 	)
 	si.set("items", si_line_items)
 
-	# ----- GST: Let ERPNext + India Compliance compute taxes -----
-	tax_template = _get_gst_tax_template(si)
-	if tax_template:
-		si.taxes_and_charges = tax_template
-		# Clear any existing taxes and recalculate from template
-		si.set("taxes", [])
-		si.set_taxes()
-		si.calculate_taxes_and_totals()
-	else:
-		# If we can't pick a GST template, log and stop; better than creating a non-compliant invoice
-		create_unicommerce_log(
-			status="Failure",
-			message=(
-				f"No GST Sales Taxes and Charges Template found for Sales Invoice derived from "
-				f"{so.name}. Company/customer GSTIN or GST templates may be misconfigured."
-			),
-		)
-		return
+	# Normalize invoice API field names to match order API field names
+	# Invoice API uses "centralGst"/"stateGst", order API uses "totalCentralGst"/"totalStateGst"
+	normalized_line_items = [
+		{
+			**item,
+			"totalCentralGst": item.get("centralGst") or item.get("totalCentralGst") or 0,
+			"totalStateGst": item.get("stateGst") or item.get("totalStateGst") or 0,
+			"totalIntegratedGst": item.get("integratedGst") or item.get("totalIntegratedGst") or 0,
+			"totalUnionTerritoryGst": item.get("unionTerritoryGst") or item.get("totalUnionTerritoryGst") or 0,
+			"centralGstPercentage": item.get("centralGstPercentage") or 0,
+			"stateGstPercentage": item.get("stateGstPercentage") or 0,
+			"integratedGstPercentage": item.get("integratedGstPercentage") or 0,
+		}
+		for item in uni_line_items
+	]
+	si.taxes_and_charges = None
+	si.set("taxes", get_taxes(normalized_line_items, channel_config))
+	si.calculate_taxes_and_totals()
 	# ------------------------------------------------------------
 
 	# Map Unicommerce meta fields
