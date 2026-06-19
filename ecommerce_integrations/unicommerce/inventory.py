@@ -121,6 +121,12 @@ def update_inventory_on_unicommerce(client=None, force=False):
                             if status_val:
                                 warehouse_success_count += 1
 
+                        # Per-item detail: warehouse, item code, quantity synced
+                        messages.append(
+                            f"     {warehouse} | {sku} | qty={inventory_map.get(sku)} | "
+                            f"{'OK' if status_val else 'FAILED'}"
+                        )
+
                     total_items_synced += warehouse_success_count
                     warehouses_processed += 1
                     messages.append(f"  -> {warehouse_success_count}/{len(erpnext_inventory)} items synced")
