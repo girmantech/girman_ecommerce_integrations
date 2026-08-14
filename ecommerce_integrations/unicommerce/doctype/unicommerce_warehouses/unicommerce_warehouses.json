@@ -5,6 +5,7 @@
  "engine": "InnoDB",
  "field_order": [
   "enabled",
+  "enable_returns",
   "unicommerce_facility_code",
   "erpnext_warehouse",
   "column_break_2",
@@ -34,6 +35,14 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Enabled"
+  },
+  {
+   "default": "0",
+   "description": "Sync returns/putaways for this facility into ERPNext.",
+   "fieldname": "enable_returns",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enable Returns"
   },
   {
    "fieldname": "column_break_2",

@@ -35,6 +35,26 @@ frappe.ui.form.on("Unicommerce Settings", {
 			);
 		});
 
+		frm.add_custom_button(
+			__("Return Putaways"),
+			() => {
+				frappe.call({
+					method: "ecommerce_integrations.unicommerce.return_putaway.sync_completed_returns",
+					args: { force: true },
+					freeze: true,
+					freeze_message: __("Syncing return putaways..."),
+					callback: (r) => {
+						if (!r.exc) {
+							frappe.msgprint(
+								__("Return putaway sync completed. Check View Logs for the summary."),
+							);
+						}
+					},
+				});
+			},
+			__("Sync Now"),
+		);
+
 		frm.add_custom_button(__("Test sync_new_orders"), () => {
 			frappe.call({
 				method: "ecommerce_integrations.unicommerce.order.sync_new_orders",
@@ -54,6 +74,19 @@ frappe.ui.form.on("Unicommerce Settings", {
 				args: { force: 1 },
 				freeze: true,
 				freeze_message: "Running prepare_delivery_note...",
+				callback: (r) => {
+					frappe.msgprint("Done! Check logs.");
+					console.log(r);
+				},
+			});
+		}, __("Debug"));
+
+		frm.add_custom_button(__("Test sync_completed_returns"), () => {
+			frappe.call({
+				method: "ecommerce_integrations.unicommerce.return_putaway.sync_completed_returns",
+				args: { force: true },
+				freeze: true,
+				freeze_message: "Running sync_completed_returns...",
 				callback: (r) => {
 					frappe.msgprint("Done! Check logs.");
 					console.log(r);
