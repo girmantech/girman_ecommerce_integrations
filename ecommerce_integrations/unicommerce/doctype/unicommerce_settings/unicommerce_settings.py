@@ -459,6 +459,34 @@ def setup_custom_fields(update=True):
 				options="Pick List Sales Order Details",
 			),
 		],
+		"Stock Entry": [
+			dict(
+				fieldname="unicommerce_section",
+				label="Unicommerce Details",
+				fieldtype="Section Break",
+				insert_after="remarks",
+				collapsible=1,
+			),
+			dict(
+				fieldname="unicommerce_reverse_pickup_code",
+				label="Unicommerce Reverse Pickup Code",
+				fieldtype="Data",
+				insert_after="unicommerce_section",
+				read_only=1,
+				unique=1,
+				no_copy=1,
+				print_hide=1,
+			),
+			dict(
+				fieldname="unicommerce_putaway_code",
+				label="Unicommerce Putaway Code",
+				fieldtype="Data",
+				insert_after="unicommerce_reverse_pickup_code",
+				read_only=1,
+				no_copy=1,
+				print_hide=1,
+			),
+		],
 	}
 
 	# create sections first for proper ordering

@@ -457,6 +457,69 @@ class UnicommerceAPIClient:
 		file_obj.close()
 		return response
 
+	def search_returns(
+		self,
+		facility_code: str,
+		return_type: str,
+		updated_from: str,
+		updated_to: str,
+		status_code: str | None = None,
+		log_error=True,
+	) -> list[JsonDict] | None:
+		"""Search returns (CIR / RTO) for a facility, by last-updated window.
+
+		Uses `updatedFrom`/`updatedTo` so returns whose putaway completed recently
+		are caught even if they were created earlier.
+
+		ref: https://documentation.unicommerce.com/docs/return-search.html
+		Note: accepts `yyyy-MM-dd` or `yyyy-MM-ddTHH:mm:ss`, max 30-day range.
+		"""
+		body = {
+			"returnType": return_type,
+			"updatedFrom": updated_from,
+			"updatedTo": updated_to,
+		}
+		if status_code:
+			body["statusCode"] = status_code
+
+		response, status = self.request(
+			endpoint="/services/rest/v1/oms/return/search",
+			body=body,
+			headers={"Facility": facility_code},
+			log_error=log_error,
+		)
+		if status and response:
+			return response.get("returnOrders") or []
+
+	def get_return(
+		self,
+		facility_code: str,
+		reverse_pickup_code: str | None = None,
+		shipment_code: str | None = None,
+		log_error=True,
+	) -> JsonDict | None:
+		"""Get full detail of a return by reverse pickup code or shipment code.
+
+		CIR (customer) returns are looked up by `reversePickupCode`; RTO (courier)
+		returns by `shipmentCode`.
+
+		ref: https://documentation.unicommerce.com/docs/return-get.html
+		"""
+		body = {}
+		if reverse_pickup_code:
+			body["reversePickupCode"] = reverse_pickup_code
+		if shipment_code:
+			body["shipmentCode"] = shipment_code
+
+		response, status = self.request(
+			endpoint="/services/rest/v1/oms/return/get",
+			body=body,
+			headers={"Facility": facility_code},
+			log_error=log_error,
+		)
+		if status:
+			return response
+
 
 def _utc_timeformat(datetime) -> str:
 	"""Get datetime in UTC/GMT as required by Unicommerce"""
