@@ -37,6 +37,9 @@ def get_inventory_levels(warehouses: tuple[str], integration: str) -> list[_dict
 			& (Bin.modified > EcommerceItem.inventory_synced_on)
 			& (EcommerceItem.integration == integration)
 		)
+		# oldest stock change first, so no item is starved when the number of items sent per request is capped
+		.orderby(Bin.modified)
+		.orderby(EcommerceItem.name)
 	)
 
 	return query.run(as_dict=1)
@@ -71,6 +74,9 @@ def get_inventory_levels_of_group_warehouse(warehouse: str, integration: str):
 		.where((Bin.warehouse.isin(all_warehouses)) & (EcommerceItem.integration == integration))
 		.groupby(EcommerceItem.erpnext_item_code)
 		.having(Max(Bin.modified) > Max(EcommerceItem.inventory_synced_on))
+		# oldest stock change first, so no item is starved when the number of items sent per request is capped
+		.orderby(Max(Bin.modified))
+		.orderby(EcommerceItem.erpnext_item_code)
 	)
 
 	data = query.run(as_dict=1)

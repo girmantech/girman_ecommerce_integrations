@@ -12,6 +12,9 @@ from ecommerce_integrations.unicommerce.utils import create_unicommerce_log
 
 JsonDict = dict[str, Any]
 
+# Seconds to wait for Unicommerce to answer a bulk inventory update before giving up
+INVENTORY_REQUEST_TIMEOUT = 120
+
 
 class UnicommerceAPIClient:
 	"""Wrapper around Unicommerce REST API
@@ -46,6 +49,7 @@ class UnicommerceAPIClient:
 		params: JsonDict | None = None,
 		files: JsonDict | None = None,
 		log_error=True,
+		timeout: int | None = None,
 	) -> tuple[JsonDict, bool]:
 		if headers is None:
 			headers = {}
@@ -56,7 +60,13 @@ class UnicommerceAPIClient:
 
 		try:
 			response = requests.request(
-				url=url, method=method, headers=headers, json=body, params=params, files=files
+				url=url,
+				method=method,
+				headers=headers,
+				json=body,
+				params=params,
+				files=files,
+				timeout=timeout,
 			)
 			# unicommerce gives useful info in response text, show it in error logs
 			response.reason = cstr(response.reason) + cstr(response.text)
@@ -196,6 +206,7 @@ class UnicommerceAPIClient:
 			endpoint="/services/rest/v1/inventory/adjust/bulk",
 			headers=extra_headers,
 			body={"inventoryAdjustments": inventory_adjustments},
+			timeout=INVENTORY_REQUEST_TIMEOUT,
 		)
 
 		if not status:
