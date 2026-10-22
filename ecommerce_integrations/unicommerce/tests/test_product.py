@@ -1,5 +1,8 @@
+from unittest.mock import patch
+
 import frappe
 import responses
+from erpnext.stock.doctype.item.test_item import make_item
 
 from ecommerce_integrations.ecommerce_integrations.doctype.ecommerce_item import ecommerce_item
 from ecommerce_integrations.unicommerce.constants import MODULE_NAME
@@ -8,6 +11,7 @@ from ecommerce_integrations.unicommerce.product import (
 	_get_barcode_data,
 	_get_item_group,
 	_validate_create_brand,
+	_link_item_with_unicommerce,
 	_validate_field,
 	import_product_from_unicommerce,
 )
@@ -32,6 +36,41 @@ class TestUnicommerceProduct(TestCaseApiClient):
 
 		log = frappe.get_last_doc("Ecommerce Integration Log", filters={"integration": "unicommerce"})
 		self.assertTrue("Failed to import" in log.message, "Logging for missing item not working")
+
+	def test_link_item_with_unicommerce(self):
+		"""requirement: an ERPNext item can be linked with an existing Unicommerce product, even when the codes differ"""
+		frappe.db.delete("Ecommerce Item", {"integration": MODULE_NAME, "integration_item_code": "TITANIUM_WATCH"})
+		with patch("ecommerce_integrations.shopify.product.upload_erpnext_item"):
+			make_item("_TestLinkItem")
+
+		result = _link_item_with_unicommerce("_TestLinkItem", "TITANIUM_WATCH", self.client)
+
+		self.assertEqual(result["sku"], "TITANIUM_WATCH")
+		self.assertEqual(ecommerce_item.get_erpnext_item_code(MODULE_NAME, "TITANIUM_WATCH"), "_TestLinkItem")
+
+		# linking the same item again is refused
+		self.assertRaises(
+			frappe.ValidationError, _link_item_with_unicommerce, "_TestLinkItem", "TITANIUM_WATCH", self.client
+		)
+
+		frappe.db.delete("Ecommerce Item", {"integration": MODULE_NAME, "integration_item_code": "TITANIUM_WATCH"})
+
+	def test_link_item_with_missing_unicommerce_product_raises_error(self):
+		"""requirement: a link is never created for a SKU that does not exist on Unicommerce"""
+		with patch("ecommerce_integrations.shopify.product.upload_erpnext_item"):
+			make_item("_TestLinkItem")
+		self.responses.add(
+			responses.POST,
+			"https://demostaging.unicommerce.com/services/rest/v1/catalog/itemType/get",
+			status=200,
+			json=self.load_fixture("missing_item"),
+			match=[responses.json_params_matcher({"skuCode": "MISSING"})],
+		)
+
+		self.assertRaises(
+			frappe.ValidationError, _link_item_with_unicommerce, "_TestLinkItem", "MISSING", self.client
+		)
+		self.assertFalse(ecommerce_item.is_synced(MODULE_NAME, "MISSING"))
 
 	def test_import_item_from_unicommerce(self):
 		"""requirement: When syncing correct item system creates item in erpnext and Ecommerce item for it"""

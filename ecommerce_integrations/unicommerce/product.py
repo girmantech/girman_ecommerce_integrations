@@ -4,7 +4,7 @@ from typing import List, NewType
 
 import frappe
 from frappe import _
-from frappe.utils import get_url, now, to_markdown
+from frappe.utils import cstr, get_url, now, to_markdown
 from frappe.utils.nestedset import get_root_of
 from stdnum.ean import is_valid as validate_barcode
 
@@ -83,6 +83,67 @@ def import_product_from_unicommerce(sku: str, client: UnicommerceAPIClient = Non
             response_data=response,
             make_new=True,
         )
+
+
+@frappe.whitelist()
+def link_item_with_unicommerce(item: str, sku: str | None = None) -> dict:
+    """Link an ERPNext Item with a product that already exists in Unicommerce.
+
+    Only the link (Ecommerce Item) is created. Nothing is changed in the Item or in Unicommerce.
+    `sku` is needed only when the Unicommerce SKU differs from the Item Code.
+    """
+    frappe.only_for("System Manager")
+    return _link_item_with_unicommerce(item, sku, UnicommerceAPIClient())
+
+
+def _link_item_with_unicommerce(item: str, sku: str | None, client: UnicommerceAPIClient) -> dict:
+    settings = frappe.get_cached_doc(SETTINGS_DOCTYPE)
+    if not settings.is_enabled():
+        frappe.throw(_("Unicommerce integration is not enabled."))
+
+    if not frappe.db.exists("Item", item):
+        frappe.throw(_("Item {0} does not exist.").format(item))
+
+    existing_sku = frappe.db.get_value(
+        "Ecommerce Item",
+        {"integration": MODULE_NAME, "erpnext_item_code": item},
+        "integration_item_code",
+    )
+    if existing_sku:
+        frappe.throw(_("Item {0} is already linked with Unicommerce SKU {1}.").format(item, existing_sku))
+
+    sku = cstr(sku or frappe.db.get_value("Item", item, "item_code")).strip()
+    linked_item = ecommerce_item.get_erpnext_item_code(MODULE_NAME, sku)
+    if linked_item:
+        frappe.throw(_("Unicommerce SKU {0} is already linked with Item {1}.").format(sku, linked_item))
+
+    response = client.get_unicommerce_item(sku, log_error=False)
+    if not response:
+        frappe.throw(
+            _(
+                "No product with SKU {0} was found in Unicommerce. "
+                "Create the product in Unicommerce first, or check the SKU."
+            ).format(sku)
+        )
+
+    frappe.get_doc(
+        {
+            "doctype": "Ecommerce Item",
+            "integration": MODULE_NAME,
+            "erpnext_item_code": item,
+            "integration_item_code": sku,
+            "has_variants": 0,
+            "sku": sku,
+        }
+    ).insert(ignore_permissions=True)
+
+    enabled = bool(response["itemTypeDTO"].get("enabled"))
+    create_unicommerce_log(
+        status="Success",
+        message=f"Linked Item {item} with Unicommerce SKU {sku} using the Link with Unicommerce button",
+        make_new=True,
+    )
+    return {"sku": sku, "enabled": enabled}
 
 
 def _create_item_dict(uni_item):
