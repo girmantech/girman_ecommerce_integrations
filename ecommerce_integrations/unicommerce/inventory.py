@@ -1,5 +1,6 @@
+import time
 from collections import defaultdict
-from typing import Dict
+from collections.abc import Iterable
 
 import frappe
 from frappe.utils import cint, now
@@ -7,7 +8,6 @@ from frappe.utils import cint, now
 from ecommerce_integrations.controllers.inventory import (
     get_inventory_levels,
     get_inventory_levels_of_group_warehouse,
-    update_inventory_sync_status,
 )
 from ecommerce_integrations.controllers.scheduling import need_to_run
 from ecommerce_integrations.unicommerce.api_client import UnicommerceAPIClient
@@ -15,14 +15,29 @@ from ecommerce_integrations.unicommerce.constants import MODULE_NAME, SETTINGS_D
 from ecommerce_integrations.unicommerce.utils import create_unicommerce_log
 
 
+# Maximum number of items sent to Unicommerce in one API request.
 MAX_INVENTORY_UPDATE_IN_REQUEST = 1000
+
+# The scheduler runs this job on the "default" queue, which kills jobs after 300 seconds.
+# Stop sending new batches after this many seconds; unsent items are picked up in the next run.
+MAX_RUN_SECONDS = 240
+
+# Rows updated per query while marking Ecommerce Items as synced.
+SYNC_STATUS_CHUNK_SIZE = 500
 
 
 def update_inventory_on_unicommerce(client=None, force=False):
     """Update ERPNext warehouse-wise inventory to Unicommerce.
 
-    Called by scheduler every minute. Decides whether to run based on
+    Called by scheduler every 5 minutes. Decides whether to run based on
     configured sync frequency. force=True ignores the set frequency.
+
+    All pending items of a warehouse are sent in batches of MAX_INVENTORY_UPDATE_IN_REQUEST,
+    oldest stock change first. A batch that fails (e.g. SKUs unknown to Unicommerce)
+    does not stop the next batches from being sent.
+
+    An Ecommerce Item is marked as synced only if Unicommerce accepted it for every
+    warehouse where it had a pending change. Otherwise the change stays pending.
     """
     log = None
 
@@ -45,10 +60,15 @@ def update_inventory_on_unicommerce(client=None, force=False):
 
         log = create_unicommerce_log()
 
-        success_map: Dict[str, bool] = defaultdict(lambda: True)
+        succeeded: set[str] = set()  # Ecommerce Items accepted by Unicommerce
+        unsynced: set[str] = set()  # Ecommerce Items with a change that was NOT accepted somewhere
         inventory_synced_on = now()
-        total_items_processed = 0
+        started = time.monotonic()
+
+        total_items_sent = 0
         total_items_synced = 0
+        total_items_failed = 0
+        total_items_left = 0
         warehouses_processed = 0
         warehouses_failed = 0
         messages = [f"Starting sync for {len(warehouses)} warehouse(s)\n"]
@@ -57,69 +77,66 @@ def update_inventory_on_unicommerce(client=None, force=False):
             try:
                 messages.append(f"[{idx}/{len(warehouses)}] Warehouse: {warehouse}")
 
-                is_group_warehouse = cint(
-                    frappe.db.get_value("Warehouse", warehouse, "is_group")
-                )
-
-                if is_group_warehouse:
-                    erpnext_inventory = get_inventory_levels_of_group_warehouse(
-                        warehouse=warehouse,
-                        integration=MODULE_NAME,
-                    )
-                else:
-                    erpnext_inventory = get_inventory_levels(
-                        warehouses=(warehouse,),
-                        integration=MODULE_NAME,
-                    )
-
-                if not erpnext_inventory:
+                pending = _get_pending_inventory(warehouse)
+                if not pending:
                     messages.append("  -> No items to sync")
                     continue
 
-                original_count = len(erpnext_inventory)
-                erpnext_inventory = erpnext_inventory[:MAX_INVENTORY_UPDATE_IN_REQUEST]
-
-                if original_count > MAX_INVENTORY_UPDATE_IN_REQUEST:
-                    messages.append(
-                        f"  -> Limited to {MAX_INVENTORY_UPDATE_IN_REQUEST} items "
-                        f"(total: {original_count})"
-                    )
-
-                total_items_processed += len(erpnext_inventory)
-
-                inventory_map = {
-                    d.integration_item_code: cint(d.actual_qty)
-                    for d in erpnext_inventory
-                }
-
                 facility_code = wh_to_facility_map.get(warehouse)
                 if not facility_code:
+                    unsynced.update(d.ecom_item for d in pending)
                     messages.append("  -> No facility code mapped for this warehouse")
                     warehouses_failed += 1
                     continue
 
-                messages.append(f"  -> Sending {len(inventory_map)} items to facility '{facility_code}'")
-
-                response, status = client.bulk_inventory_update(
-                    facility_code=facility_code,
-                    inventory_map=inventory_map,
+                messages.append(
+                    f"  -> {len(pending)} item(s) pending, sending to facility '{facility_code}' "
+                    f"in batches of {MAX_INVENTORY_UPDATE_IN_REQUEST}"
                 )
 
-                if status:
-                    sku_to_ecom_item_map = {
-                        d.integration_item_code: d.ecom_item
-                        for d in erpnext_inventory
-                    }
-                    warehouse_success_count = 0
+                warehouse_failed = False
+                for start in range(0, len(pending), MAX_INVENTORY_UPDATE_IN_REQUEST):
+                    batch = pending[start : start + MAX_INVENTORY_UPDATE_IN_REQUEST]
 
+                    if time.monotonic() - started > MAX_RUN_SECONDS:
+                        left = pending[start:]
+                        unsynced.update(d.ecom_item for d in left)
+                        total_items_left += len(left)
+                        messages.append(
+                            f"  -> Time limit reached, {len(left)} item(s) left for the next run"
+                        )
+                        break
+
+                    inventory_map = {d.integration_item_code: cint(d.actual_qty) for d in batch}
+                    ecom_items_by_sku = defaultdict(list)
+                    for d in batch:
+                        ecom_items_by_sku[d.integration_item_code].append(d.ecom_item)
+
+                    total_items_sent += len(inventory_map)
+                    response, status = client.bulk_inventory_update(
+                        facility_code=facility_code,
+                        inventory_map=inventory_map,
+                    )
+
+                    if not status:
+                        left = pending[start:]
+                        unsynced.update(d.ecom_item for d in left)
+                        total_items_failed += len(inventory_map)
+                        total_items_left += len(left) - len(batch)
+                        messages.append(
+                            f"  -> API returned failure for batch of {len(inventory_map)} item(s), "
+                            "remaining items left for the next run"
+                        )
+                        warehouse_failed = True
+                        break
+
+                    batch_synced = 0
                     for sku, status_val in response.items():
-                        ecom_item = sku_to_ecom_item_map.get(sku)
-                        if ecom_item:
-                            success_map[ecom_item] = (
-                                success_map[ecom_item] and status_val
-                            )
-                            if status_val:
-                                warehouse_success_count += 1
+                        for ecom_item in ecom_items_by_sku.get(sku, []):
+                            (succeeded if status_val else unsynced).add(ecom_item)
+
+                        if status_val:
+                            batch_synced += 1
 
                         # Per-item detail: warehouse, item code, quantity synced
                         messages.append(
@@ -127,12 +144,21 @@ def update_inventory_on_unicommerce(client=None, force=False):
                             f"{'OK' if status_val else 'FAILED'}"
                         )
 
-                    total_items_synced += warehouse_success_count
-                    warehouses_processed += 1
-                    messages.append(f"  -> {warehouse_success_count}/{len(erpnext_inventory)} items synced")
-                else:
-                    messages.append("  -> API returned failure")
+                    # SKUs we sent that Unicommerce did not report on are not confirmed
+                    for sku in set(ecom_items_by_sku) - set(response):
+                        unsynced.update(ecom_items_by_sku[sku])
+                        messages.append(
+                            f"     {warehouse} | {sku} | qty={inventory_map.get(sku)} | NO RESPONSE"
+                        )
+
+                    total_items_synced += batch_synced
+                    total_items_failed += len(inventory_map) - batch_synced
+                    messages.append(f"  -> {batch_synced}/{len(inventory_map)} items synced in this batch")
+
+                if warehouse_failed:
                     warehouses_failed += 1
+                else:
+                    warehouses_processed += 1
 
             except Exception:
                 warehouses_failed += 1
@@ -143,7 +169,8 @@ def update_inventory_on_unicommerce(client=None, force=False):
                 )
                 continue
 
-        _update_inventory_sync_status(success_map, inventory_synced_on)
+        # Only items accepted for every warehouse with a pending change are marked as synced.
+        _update_inventory_sync_status(succeeded - unsynced, inventory_synced_on)
 
         try:
             frappe.db.set_value(
@@ -163,14 +190,20 @@ def update_inventory_on_unicommerce(client=None, force=False):
             f"SUMMARY\n"
             f"{'=' * 50}\n"
             f"Warehouses: {warehouses_processed} success / {warehouses_failed} failed\n"
-            f"Items: {total_items_synced} / {total_items_processed} synced\n"
+            f"Items: {total_items_synced} synced / {total_items_failed} failed / "
+            f"{total_items_left} left for next run ({total_items_sent} sent)\n"
             f"{'=' * 50}"
         )
         messages.append(summary)
 
         if log:
             log.message = "\n".join(messages)
-            log.status = "Success" if warehouses_failed == 0 else "Error"
+            if warehouses_failed:
+                log.status = "Error"
+            elif total_items_failed or total_items_left:
+                log.status = "Warning"
+            else:
+                log.status = "Success"
             log.save(ignore_permissions=True)
 
         frappe.db.commit()
@@ -189,15 +222,30 @@ def update_inventory_on_unicommerce(client=None, force=False):
         raise
 
 
-def _update_inventory_sync_status(ecom_item_success_map: Dict[str, bool], timestamp: str) -> None:
-    """Update inventory sync status with per-item error handling."""
-    for ecom_item, status in ecom_item_success_map.items():
+def _get_pending_inventory(warehouse: str) -> list:
+    """Items of `warehouse` whose stock changed since they were last synced (oldest change first)."""
+    if cint(frappe.db.get_value("Warehouse", warehouse, "is_group")):
+        return get_inventory_levels_of_group_warehouse(warehouse=warehouse, integration=MODULE_NAME)
+
+    return get_inventory_levels(warehouses=(warehouse,), integration=MODULE_NAME)
+
+
+def _update_inventory_sync_status(ecom_items: Iterable[str], timestamp: str) -> None:
+    """Mark Ecommerce Items as inventory synced at `timestamp`, in chunks."""
+    ecom_items = list(ecom_items)
+    EcommerceItem = frappe.qb.DocType("Ecommerce Item")
+
+    for start in range(0, len(ecom_items), SYNC_STATUS_CHUNK_SIZE):
+        chunk = ecom_items[start : start + SYNC_STATUS_CHUNK_SIZE]
         try:
-            if status:
-                update_inventory_sync_status(ecom_item, timestamp)
+            (
+                frappe.qb.update(EcommerceItem)
+                .set(EcommerceItem.inventory_synced_on, timestamp)
+                .where(EcommerceItem.name.isin(chunk))
+                .run()
+            )
         except Exception:
             frappe.log_error(
-                title=f"Failed to update sync status: {ecom_item}",
+                title="Failed to update sync status",
                 message=frappe.get_traceback(),
             )
-            continue
